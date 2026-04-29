@@ -8,23 +8,23 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: 获取源码 (包含子模块)
+      - name: 获取源码
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: 配置官方 Theos 编译环境
-        uses: theos/theos-action@v1
-
-      - name: 开始编译
+      - name: 纯手动安装 Theos 与 iOS SDK
         run: |
-          make clean
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          git clone https://github.com/theos/sdks.git $HOME/theos/sdks
+
+      - name: 开始编译 Dylib
+        run: |
           make FINALPACKAGE=1
 
       - name: 提取并上传产物
         uses: actions/upload-artifact@v4
         with:
           name: FilzaApplySandboxExt-Dylib
-          path: |
-            .theos/obj/**/*.dylib
-            packages/**/*.deb
+          path: .theos/obj/debug/*.dylib
