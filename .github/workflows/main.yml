@@ -1,0 +1,27 @@
+name: Build FilzaJailed Tweak
+
+on:
+  workflow_dispatch: # 允许你手动点击按钮触发编译
+
+jobs:
+  build:
+    runs-on: macos-latest # 使用 GitHub 免费提供的云端 Mac 电脑
+
+    steps:
+      - name: 获取源码
+        uses: actions/checkout@v4
+
+      - name: 安装 Theos 编译环境
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+
+      - name: 开始编译 dylib
+        run: |
+          export THEOS=~/theos
+          make FINALPACKAGE=1
+
+      - name: 提取并上传编译好的文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: FilzaApplySandboxExt-Dylib
+          path: .theos/obj/**/*.dylib
