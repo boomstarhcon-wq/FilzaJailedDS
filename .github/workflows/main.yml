@@ -13,18 +13,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: 纯手动安装 Theos 与 iOS SDK
+      - name: 配置 Theos 和 SDK
         run: |
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          # 核心修复：先删除 Theos 自动创建的空文件夹，避免 Git 128 报错
+          rm -rf $HOME/theos/sdks
           git clone https://github.com/theos/sdks.git $HOME/theos/sdks
 
-      - name: 开始编译 Dylib
+      - name: 开始编译
         run: |
+          make clean
           make FINALPACKAGE=1
 
       - name: 提取并上传产物
         uses: actions/upload-artifact@v4
         with:
           name: FilzaApplySandboxExt-Dylib
-          path: .theos/obj/debug/*.dylib
+          path: .theos/obj/**/*.dylib
