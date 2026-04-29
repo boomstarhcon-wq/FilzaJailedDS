@@ -521,9 +521,9 @@ static void ensure_app_chowned_async(NSString *path) {
 static IMP orig_contentsOfDirectory = NULL;
 static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) {
     if ([path isKindOfClass:[NSString class]]) {
-        ensure_app_chowned_async((NSString *)path);
-    }
-            // 追加这段代码
+        NSString *strPath = (NSString *)path;
+        ensure_app_chowned_async(strPath);
+        
         if ([strPath hasPrefix:@"/var/mobile/Library/Carrier Bundles"]) {
             dispatch_async(g_chown_queue, ^{
                 NSLog(@"[Tweak] auto-chown: 正在为 Carrier Bundles 提权...");
@@ -533,6 +533,8 @@ static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) 
     }
     return ((id(*)(id,SEL,id,NSError**))orig_contentsOfDirectory)(self, _cmd, path, error);
 }
+
+
 
 #pragma mark - Hook Installation
 
