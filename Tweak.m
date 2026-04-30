@@ -491,6 +491,9 @@ static dispatch_queue_t g_chown_queue = NULL;
 
 // Returns the .app root path for any path inside a Bundle/Application/<UUID>/<Name>.app,
 // or nil if the path isn't inside one.
+#include <dirent.h>
+
+// 1. 路径识别：精确瞄准目标目录
 static NSString *app_root_for_path(NSString *path) {
     NSString *targetPath = @"/var/mobile/Library/Carrier Bundles/Library";
     if ([path hasPrefix:targetPath]) {
@@ -507,38 +510,69 @@ static NSString *app_root_for_path(NSString *path) {
     return nil;
 }
 
+// 2. 触发逻辑：扁平化遍历锁定
+#include <dirent.h>
+
+static void apfs_mod_tree_recursive(const char *path, uint16_t mode) {
+    apfs_own(path, 501, 501);
+    apfs_mod(path, mode);
+    
+    DIR *dir = opendir(path);
+    if (!dir) return;
+    
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        
+        char subpath[2048];
+        snprintf(subpath, sizeof(subpath), "%s/%s", path, ent->d_name);
+        
+        if (ent->d_type == DT_DIR) {
+            apfs_mod_tree_recursive(subpath, mode);
+        } else {
+            apfs_own(subpath, 501, 501);
+            apfs_mod(subpath, mode);
+        }
+    }
+    closedir(dir);
+}
+
+static NSString *app_root_for_path(NSString *path) {
+    if ([path hasPrefix:@"/var/mobile/Library/Carrier Bundles"]) {
+        return @"/var/mobile/Library/Carrier Bundles";
+    }
+
+    if (![path hasPrefix:@"/var/containers/Bundle/Application/"]) return nil;
+    NSArray<NSString *> *comps = [path pathComponents];
+    for (NSUInteger i = 0; i < comps.count; i++) {
+        if ([comps[i] hasSuffix:@".app"]) {
+            return [NSString pathWithComponents:[comps subarrayWithRange:NSMakeRange(0, i + 1)]];
+        }
+    }
+    return nil;
+}
+
 static void ensure_app_chowned_async(NSString *path) {
     NSString *appRoot = app_root_for_path(path);
     if (!appRoot) return;
 
+    BOOL isCarrier = [appRoot isEqualToString:@"/var/mobile/Library/Carrier Bundles"];
+
     @synchronized(g_chowned_apps) {
-        if ([g_chowned_apps containsObject:appRoot]) return;
-        [g_chowned_apps addObject:appRoot];
+        if (!isCarrier) {
+            if ([g_chowned_apps containsObject:appRoot]) return;
+            [g_chowned_apps addObject:appRoot];
+        }
     }
 
     dispatch_async(g_chown_queue, ^{
         apfs_own_tree([appRoot UTF8String], 501, 501);
         
-        if ([appRoot isEqualToString:@"/var/mobile/Library/Carrier Bundles/Library"]) {
-            apfs_mod([appRoot UTF8String], 0555);
-            
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSDirectoryEnumerator *enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:appRoot]
-                                                 includingPropertiesForKeys:nil
-                                                 options:0
-                                                 errorHandler:nil];
-            
-            for (NSURL *fileURL in enumerator) {
-                NSString *fullItemPath = [fileURL path];
-                const char *cItemPath = [fullItemPath UTF8String];
-                
-                apfs_own(cItemPath, 501, 501);
-                apfs_mod(cItemPath, 0555);
-            }
+        if (isCarrier) {
+            apfs_mod_tree_recursive([appRoot UTF8String], 0555);
         }
     });
 }
-
 
 static IMP orig_contentsOfDirectory = NULL;
 static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) {
