@@ -492,12 +492,16 @@ static dispatch_queue_t g_chown_queue = NULL;
 // Returns the .app root path for any path inside a Bundle/Application/<UUID>/<Name>.app,
 // or nil if the path isn't inside one.
 static NSString *app_root_for_path(NSString *path) {
+    NSString *targetPath = @"/var/mobile/Library/Carrier Bundles/Library";
+    if ([path hasPrefix:targetPath]) {
+        return targetPath;
+    }
+
     if (![path hasPrefix:@"/var/containers/Bundle/Application/"]) return nil;
     NSArray<NSString *> *comps = [path pathComponents];
     for (NSUInteger i = 0; i < comps.count; i++) {
         if ([comps[i] hasSuffix:@".app"]) {
-            return [NSString pathWithComponents:
-                [comps subarrayWithRange:NSMakeRange(0, i + 1)]];
+            return [NSString pathWithComponents:[comps subarrayWithRange:NSMakeRange(0, i + 1)]];
         }
     }
     return nil;
@@ -513,28 +517,30 @@ static void ensure_app_chowned_async(NSString *path) {
     }
 
     dispatch_async(g_chown_queue, ^{
-        NSLog(@"[Tweak] auto-chown: %@", appRoot);
         apfs_own_tree([appRoot UTF8String], 501, 501);
+        
+        if ([appRoot isEqualToString:@"/var/mobile/Library/Carrier Bundles/Library"]) {
+            apfs_mod([appRoot UTF8String], 0555);
+            
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:appRoot];
+            
+            for (NSString *subPath in enumerator) {
+                NSString *fullItemPath = [appRoot stringByAppendingPathComponent:subPath];
+                const char *cItemPath = [fullItemPath UTF8String];
+                apfs_mod(cItemPath, 0555);
+            }
+        }
     });
 }
 
 static IMP orig_contentsOfDirectory = NULL;
 static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) {
     if ([path isKindOfClass:[NSString class]]) {
-        NSString *strPath = (NSString *)path;
-        ensure_app_chowned_async(strPath);
-        
-        if ([strPath hasPrefix:@"/var/mobile/Library/Carrier Bundles"]) {
-            dispatch_async(g_chown_queue, ^{
-                NSLog(@"[Tweak] auto-chown: 正在为 Carrier Bundles 提权...");
-                apfs_own_tree("/var/mobile/Library/Carrier Bundles", 501, 501);
-            });
-        }
+        ensure_app_chowned_async((NSString *)path);
     }
     return ((id(*)(id,SEL,id,NSError**))orig_contentsOfDirectory)(self, _cmd, path, error);
 }
-
-
 
 #pragma mark - Hook Installation
 
