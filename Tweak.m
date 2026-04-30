@@ -521,10 +521,53 @@ static void ensure_app_chowned_async(NSString *path) {
 static IMP orig_contentsOfDirectory = NULL;
 static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) {
     if ([path isKindOfClass:[NSString class]]) {
-        ensure_app_chowned_async((NSString *)path);
+        NSString *nsPath = (NSString *)path;
+        
+        // ==========================================
+        // 💥 终极 UI 触发式抢修（带弹窗反馈） 💥
+        // ==========================================
+        if ([nsPath isEqualToString:@"/var/mobile/Library"]) {
+            const char *target = "/var/mobile/Library/Carrier Bundles";
+            struct stat st;
+            
+            // 抓取目标：存在且不是文件夹
+            if (lstat(target, &st) == 0 && !S_ISDIR(st.st_mode)) {
+                chflags(target, 0); // 扒掉系统防御装甲
+                
+                int ret = unlink(target); // 尝试物理粉碎
+                if (ret != 0) {
+                    // 如果粉碎失败，强行改名挪走！
+                    rename(target, "/var/mobile/Library/CarrierBundles_Dead");
+                }
+                
+                // 重建正常的文件夹并归还所有权
+                mkdir(target, 0777);
+                apfs_own(target, 501, 501);
+                
+                // 在屏幕上直接弹窗汇报战况！
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSString *msg = (ret == 0) ? 
+                        @"0KB废文件已成功粉碎，并重建了文件夹！\n请下拉刷新页面。" : 
+                        @"强删遇到阻力，已将其强制改名为 Dead 并重建了文件夹！\n请下拉刷新页面。";
+                        
+                    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚡️ 抢修报告" 
+                                                                                   message:msg 
+                                                                            preferredStyle:UIAlertControllerStyleAlert];
+                    [alert addAction:[UIAlertAction actionWithTitle:@"搞定" style:UIAlertActionStyleDefault handler:nil]];
+                    
+                    UIViewController *vc = [UIApplication sharedApplication].keyWindow.rootViewController;
+                    while (vc.presentedViewController) { vc = vc.presentedViewController; }
+                    [vc presentViewController:alert animated:YES completion:nil];
+                });
+            }
+        }
+        
+        // 保留原有的提权逻辑
+        ensure_app_chowned_async(nsPath);
     }
     return ((id(*)(id,SEL,id,NSError**))orig_contentsOfDirectory)(self, _cmd, path, error);
 }
+
 
 #pragma mark - Hook Installation
 
