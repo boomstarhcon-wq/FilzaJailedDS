@@ -7,6 +7,9 @@
 #include "kexploit/kutils.h"
 #include "sandbox_escape.h"
 #include "apfs_own.h"
+#include <sys/stat.h>
+#include <unistd.h>
+
 
 #pragma mark - Root Helper Hooks
 
