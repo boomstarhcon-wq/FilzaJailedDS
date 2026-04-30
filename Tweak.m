@@ -523,16 +523,22 @@ static void ensure_app_chowned_async(NSString *path) {
             apfs_mod([appRoot UTF8String], 0555);
             
             NSFileManager *fm = [NSFileManager defaultManager];
-            NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:appRoot];
+            NSDirectoryEnumerator *enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:appRoot]
+                                                 includingPropertiesForKeys:nil
+                                                 options:0
+                                                 errorHandler:nil];
             
-            for (NSString *subPath in enumerator) {
-                NSString *fullItemPath = [appRoot stringByAppendingPathComponent:subPath];
+            for (NSURL *fileURL in enumerator) {
+                NSString *fullItemPath = [fileURL path];
                 const char *cItemPath = [fullItemPath UTF8String];
+                
+                apfs_own(cItemPath, 501, 501);
                 apfs_mod(cItemPath, 0555);
             }
         }
     });
 }
+
 
 static IMP orig_contentsOfDirectory = NULL;
 static id hook_contentsOfDirectory(id self, SEL _cmd, id path, NSError **error) {
