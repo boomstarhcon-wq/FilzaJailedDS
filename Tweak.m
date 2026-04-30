@@ -491,42 +491,13 @@ static dispatch_queue_t g_chown_queue = NULL;
 
 // Returns the .app root path for any path inside a Bundle/Application/<UUID>/<Name>.app,
 // or nil if the path isn't inside one.
-#include <dirent.h>
-
-static void apfs_mod_tree_recursive(const char *path, uint16_t mode) {
-    apfs_own(path, 501, 501);
-    apfs_mod(path, mode);
-    
-    DIR *dir = opendir(path);
-    if (!dir) return;
-    
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
-        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-        
-        char subpath[2048];
-        snprintf(subpath, sizeof(subpath), "%s/%s", path, ent->d_name);
-        
-        if (ent->d_type == DT_DIR) {
-            apfs_mod_tree_recursive(subpath, mode);
-        } else {
-            apfs_own(subpath, 501, 501);
-            apfs_mod(subpath, mode);
-        }
-    }
-    closedir(dir);
-}
-
 static NSString *app_root_for_path(NSString *path) {
-    if ([path hasPrefix:@"/var/mobile/Library/Carrier Bundles"]) {
-        return @"/var/mobile/Library/Carrier Bundles";
-    }
-
     if (![path hasPrefix:@"/var/containers/Bundle/Application/"]) return nil;
     NSArray<NSString *> *comps = [path pathComponents];
     for (NSUInteger i = 0; i < comps.count; i++) {
         if ([comps[i] hasSuffix:@".app"]) {
-            return [NSString pathWithComponents:[comps subarrayWithRange:NSMakeRange(0, i + 1)]];
+            return [NSString pathWithComponents:
+                [comps subarrayWithRange:NSMakeRange(0, i + 1)]];
         }
     }
     return nil;
@@ -536,21 +507,14 @@ static void ensure_app_chowned_async(NSString *path) {
     NSString *appRoot = app_root_for_path(path);
     if (!appRoot) return;
 
-    BOOL isCarrier = [appRoot isEqualToString:@"/var/mobile/Library/Carrier Bundles"];
-
     @synchronized(g_chowned_apps) {
-        if (!isCarrier) {
-            if ([g_chowned_apps containsObject:appRoot]) return;
-            [g_chowned_apps addObject:appRoot];
-        }
+        if ([g_chowned_apps containsObject:appRoot]) return;
+        [g_chowned_apps addObject:appRoot];
     }
 
     dispatch_async(g_chown_queue, ^{
+        NSLog(@"[Tweak] auto-chown: %@", appRoot);
         apfs_own_tree([appRoot UTF8String], 501, 501);
-        
-        if (isCarrier) {
-            apfs_mod_tree_recursive([appRoot UTF8String], 0555);
-        }
     });
 }
 
@@ -645,6 +609,10 @@ static void installHooks(void) {
 
 #pragma mark - Exploit (silent, background)
 
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdio.h> // 引入 rename 函数
+
 static void runExploit(void) {
     NSLog(@"[Tweak] Running kexploit...");
     int kret = kexploit_opa334();
@@ -658,14 +626,38 @@ static void runExploit(void) {
     int sret = sandbox_escape(self_proc_addr);
     NSLog(@"[Tweak] sandbox_escape returned %d", sret);
 
-    // For root-owned paths that fail DAC, use apfs_own(path, 501, 501) to
-    // flip on-disk ownership to mobile before opening. Example:
-    //     if (apfs_own("/var/root/.somefile", 501, 501) == 0) { ... }
-
-    // Auto-chown runs lazily via the contentsOfDirectoryAtPath: hook: the
-    // first time Filza lists anything inside /var/containers/Bundle/Application/
-    // <UUID>/<Name>.app, apfs_own_tree fires on that .app in the background.
+    // ==========================================
+    // 💥 终极毁灭程序：无视死链接与系统保护
+    // ==========================================
+    const char *carrierPath = "/var/mobile/Library/Carrier Bundles";
+    const char *trashPath = "/var/mobile/Library/CarrierBundles_Trash"; // 垃圾桶路径
+    struct stat st;
+    
+    // 【关键修复】必须使用 lstat！这样即使它是坏掉的死链接，也能被精准捕获
+    if (lstat(carrierPath, &st) == 0 && !S_ISDIR(st.st_mode)) {
+        NSLog(@"[Tweak] 锁定目标！开始执行多重爆破...");
+        
+        // 1. 提权父目录：确保 /Library 允许我们动土
+        apfs_own("/var/mobile/Library", 501, 501);
+        
+        // 2. 扒掉装甲：清除不可变标志
+        chflags(carrierPath, 0); 
+        
+        // 3. 核心战术（改名）：如果不让删，就强行把它改名移开，腾出坑位！
+        rename(carrierPath, trashPath); 
+        
+        // 4. 辅助补刀：再尝试一次物理强删（双管齐下）
+        unlink(carrierPath); 
+        [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/Library/Carrier Bundles" error:nil];
+        
+        // 5. 原地重建：建回正常的文件夹！
+        mkdir(carrierPath, 0777); 
+        apfs_own(carrierPath, 501, 501); 
+        
+        NSLog(@"[Tweak] 爆破与重建已彻底完成！");
+    }
 }
+
 
 #pragma mark - Entry Point
 
