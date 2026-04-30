@@ -493,26 +493,6 @@ static dispatch_queue_t g_chown_queue = NULL;
 // or nil if the path isn't inside one.
 #include <dirent.h>
 
-// 1. 路径识别：精确瞄准目标目录
-static NSString *app_root_for_path(NSString *path) {
-    NSString *targetPath = @"/var/mobile/Library/Carrier Bundles/Library";
-    if ([path hasPrefix:targetPath]) {
-        return targetPath;
-    }
-
-    if (![path hasPrefix:@"/var/containers/Bundle/Application/"]) return nil;
-    NSArray<NSString *> *comps = [path pathComponents];
-    for (NSUInteger i = 0; i < comps.count; i++) {
-        if ([comps[i] hasSuffix:@".app"]) {
-            return [NSString pathWithComponents:[comps subarrayWithRange:NSMakeRange(0, i + 1)]];
-        }
-    }
-    return nil;
-}
-
-// 2. 触发逻辑：扁平化遍历锁定
-#include <dirent.h>
-
 static void apfs_mod_tree_recursive(const char *path, uint16_t mode) {
     apfs_own(path, 501, 501);
     apfs_mod(path, mode);
